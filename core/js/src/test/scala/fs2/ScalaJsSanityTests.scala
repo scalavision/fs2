@@ -1,6 +1,7 @@
 package fs2
 
 import cats.effect.IO
+import TestUtil._
 
 // ScalaTest doesn't currently support use of forAll with futures, which means
 // tests that run streams from within forAll cannot be expressed. Until
@@ -15,7 +16,9 @@ class ScalaJsSanityTests extends AsyncFs2Spec {
         Stream.repeatEval(IO(i)).take(10)
       }
     runLogF(src.join(10)).map { result =>
-      result.sorted shouldBe (1 until 100).toVector.flatMap(Vector.fill(10)(_)).sorted
+      result.sorted shouldBe (1 until 100).toVector
+        .flatMap(Vector.fill(10)(_))
+        .sorted
     }
   }
 }

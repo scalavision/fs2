@@ -4,17 +4,14 @@ import java.util.concurrent.TimeoutException
 import org.scalacheck.{Arbitrary, Cogen, Gen, Shrink}
 
 import scala.concurrent.Future
-import scala.concurrent.duration._
 
 import cats.effect.IO
 import cats.implicits._
 import fs2.internal.NonFatal
 
-trait TestUtil extends TestUtilPlatform {
+object TestUtil extends TestUtilPlatform {
 
-  val timeout: FiniteDuration = 60.seconds
-
-  def runLogF[A](s: Stream[IO,A]): Future[Vector[A]] = (IO.shift *> s.runLog).unsafeToFuture
+  def runLogF[A](s: Stream[IO,A]): Future[Vector[A]] = (IO.shift *> s.compile.toVector).unsafeToFuture
 
   def spuriousFail(s: Stream[IO,Int], f: Failure): Stream[IO,Int] =
     s.flatMap { i => if (i % (math.random * 10 + 1).toInt == 0) f.get
@@ -26,7 +23,7 @@ trait TestUtil extends TestUtilPlatform {
       case e: InterruptedException => throw e
       case e: TimeoutException => throw e
       case Err => ()
-      case NonFatal(e) => e.printStackTrace; ()
+      case NonFatal(e) => ()
     }
 
   implicit def arbChunk[A](implicit A: Arbitrary[A]): Arbitrary[Chunk[A]] = Arbitrary(
@@ -37,6 +34,9 @@ trait TestUtil extends TestUtilPlatform {
       1 -> Chunk.empty[A]
     )
   )
+
+  implicit def cogenChunk[A: Cogen]: Cogen[Chunk[A]] =
+    Cogen[List[A]].contramap(_.toList)
 
   /** Newtype for generating test cases. Use the `tag` for labeling properties. */
   case class PureStream[+A](tag: String, get: Stream[Pure,A])
@@ -103,12 +103,7 @@ trait TestUtil extends TestUtilPlatform {
       Failure("failure-mid-effect", Stream.eval(IO.pure(()).flatMap(_ => throw Err))),
       Failure("failure-in-pure-code", Stream.emit(42).map(_ => throw Err)),
       Failure("failure-in-pure-code(2)", Stream.emit(42).flatMap(_ => throw Err)),
-      Failure("failure-in-pure-pull", Stream.emit(42).pull.uncons.map(_ => throw Err).stream),
-      Failure("failure-in-async-code",
-        Stream.eval[IO,Int](IO(throw Err)).pull.unconsAsync.flatMap { _.pull.flatMap {
-          case None => Pull.pure(())
-          case Some((hd,tl)) => Pull.output(hd) >> Pull.pure(())
-        }}.stream)
+      Failure("failure-in-pure-pull", Stream.emit(42).pull.uncons.map(_ => throw Err).stream)
     )
   )
 
@@ -124,5 +119,3 @@ trait TestUtil extends TestUtilPlatform {
 
   val nonEmptyNestedVectorGen: Gen[Vector[Vector[Int]]] = nestedVectorGen[Int](1,10)
 }
-
-object TestUtil extends TestUtil

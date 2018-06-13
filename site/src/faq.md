@@ -1,3 +1,10 @@
+---
+layout: page
+title:  "FAQ"
+section: "faq"
+position: 3
+---
+
 # Frequently Asked questions
 
 ### Why does stream evaluation sometimes hang in the REPL?

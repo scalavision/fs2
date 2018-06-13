@@ -12,8 +12,8 @@ Quick links:
 * [API docs (fs2-core)][core-api], [API docs (fs2-io)][io-api]
 * [Docs and getting help](#docs)
 
-[io-api]: https://oss.sonatype.org/service/local/repositories/releases/archive/co/fs2/fs2-io_2.12/0.9.6/fs2-io_2.12-0.9.6-javadoc.jar/!/fs2/io/index.html
-[core-api]: https://oss.sonatype.org/service/local/repositories/releases/archive/co/fs2/fs2-core_2.12/0.9.6/fs2-core_2.12-0.9.6-javadoc.jar/!/fs2/index.html
+[io-api]: https://oss.sonatype.org/service/local/repositories/releases/archive/co/fs2/fs2-io_2.12/0.10.4/fs2-io_2.12-0.10.4-javadoc.jar/!/fs2/io/index.html
+[core-api]: https://oss.sonatype.org/service/local/repositories/releases/archive/co/fs2/fs2-core_2.12/0.10.4/fs2-core_2.12-0.10.4-javadoc.jar/!/fs2/index.html
 
 ### <a id="about"></a>About the library ###
 
@@ -36,43 +36,51 @@ def converter[F[_]](implicit F: Sync[F]): F[Unit] =
     .intersperse("\n")
     .through(text.utf8Encode)
     .through(io.file.writeAll(Paths.get("testdata/celsius.txt")))
-    .run
+    .compile.drain
 
 // at the end of the universe...
 val u: Unit = converter[IO].unsafeRunSync()
 ```
 
-This will construct a `F[Unit]`, `converter`, which reads lines incrementally from `testdata/fahrenheit.txt`, skipping blanklines and commented lines. It then parses temperatures in degrees Fahrenheit, converts these to Celsius, UTF-8 encodes the output, and writes incrementally to `testdata/celsius.txt`, using constant memory. The input and output files will be closed upon normal termination or if exceptions occur.
+This will construct a `F[Unit]`, `converter`, which reads lines incrementally from `testdata/fahrenheit.txt`, skipping blank lines and commented lines. It then parses temperatures in degrees Fahrenheit, converts these to Celsius, UTF-8 encodes the output, and writes incrementally to `testdata/celsius.txt`, using constant memory. The input and output files will be closed upon normal termination or if exceptions occur.
 
-At the end it's saying that the effect `F` will be of type `cats.effect.IO` and then it's possible to invoke `unsafeRunSync()`. You can choose a different effect type or your own as long as it implements `cats.effect.Sync` for this case. In some other cases the constraints might require to implement interfaces like `cats.effect.MonadError[?, Throwable]`, `cats.effect.Async` and / or `cats.effect.Effect`.
+At the end it's saying that the effect `F` will be of type `cats.effect.IO` and then it's possible to invoke `unsafeRunSync()`. You can choose a different effect type or your own as long as it implements `cats.effect.Sync`.
 
 The library supports a number of other interesting use cases:
 
-* _Zipping and merging of streams:_ A streaming computation may read from multiple sources in a streaming fashion, zipping or merging their elements using an arbitrary `Tee`. In general, clients have a great deal of flexibility in what sort of topologies they can define--source, sink, and effectful channels are all first-class concepts in the library.
+* _Zipping and merging of streams:_ A streaming computation may read from multiple sources in a streaming fashion, zipping or merging their elements using an arbitrary `Pipe2`. In general, clients have a great deal of flexibility in what sort of topologies they can define--source, sink, and effectful channels are all first-class concepts in the library.
 * _Dynamic resource allocation:_ A streaming computation may allocate resources dynamically (for instance, reading a list of files to process from a stream built off a network socket), and the library will ensure these resources get released upon normal termination or if exceptions occur.
 * _Nondeterministic and concurrent processing:_ A computation may read from multiple input streams simultaneously, using whichever result comes back first, and a pipeline of transformations can allow for nondeterminism and queueing at each stage.
 
 ### <a id="docs"></a>Documentation and getting help ###
 
-* [The official guide](docs/guide.md) is a good starting point for learning more about the library.
-* [The FAQ](docs/faq.md) has frequently asked questions. Feel free to open issues or PRs with additions to the FAQ!
+* [The official guide](https://functional-streams-for-scala.github.io/fs2/guide.html) is a good starting point for learning more about the library.
+* [The FAQ](https://functional-streams-for-scala.github.io/fs2/faq.html) has frequently asked questions. Feel free to open issues or PRs with additions to the FAQ!
 * Also feel free to come discuss and ask/answer questions in [the gitter channel](https://gitter.im/functional-streams-for-scala/fs2) and/or on StackOverflow using [the tag FS2](http://stackoverflow.com/tags/fs2).
 
 Blog posts and other external resources are listed on the [Additional Resources](https://github.com/functional-streams-for-scala/fs2/wiki/Additional-Resources) page.
 
 ### <a id="getit"></a> Where to get the latest version ###
 
-The 0.10 release is almost complete and will be released when Cats 1.0 is released. Milestone builds are available now. The [0.10 migration guide](docs/migration-guide-0.10.md) summarizes the differences between 0.10 and 0.9. To get 0.10, add the following to your SBT build:
+* [API docs (fs2-core 0.10.4)][core-api]
+* [API docs (fs2-io 0.10.4)][io-api]
+
+The latest version is 0.10.x. See the badge at the top of the README for the exact version number.
+
+The [0.10 migration guide](https://github.com/functional-streams-for-scala/fs2/blob/series/0.10/docs/migration-guide-0.10.md)
+summarizes the differences between 0.10 and 0.9. To get 0.10.x, add the following to your SBT build:
 
 ```
 // available for Scala 2.11, 2.12
-libraryDependencies += "co.fs2" %% "fs2-core" % "0.10.0-M8" // For cats 1.0.0-RC1 and cats-effect 0.5
+libraryDependencies += "co.fs2" %% "fs2-core" % "0.10.4" // For cats 1.1.0 and cats-effect 0.10
 
 // optional I/O library
-libraryDependencies += "co.fs2" %% "fs2-io" % "0.10.0-M8"
+libraryDependencies += "co.fs2" %% "fs2-io" % "0.10.4"
 ```
 
-The 0.9 release is out and we recommend upgrading. You may want to first [read the 0.9 migration guide](docs/migration-guide-0.9.md) if you are upgrading from 0.8 or earlier. To get 0.9, add the following to your SBT build:
+The previous stable release is 0.9.7. You may want to first
+[read the 0.9 migration guide](https://github.com/functional-streams-for-scala/fs2/blob/series/0.10/docs/migration-guide-0.9.md)
+if you are upgrading from 0.8 or earlier. To get 0.9, add the following to your SBT build:
 
 ```
 // available for Scala 2.11, 2.12
@@ -94,13 +102,12 @@ API docs:
 * [The core library][core-api]
 * [The `io` library][io-api], FS2 bindings for NIO-based file I/O and TCP/UDP networking
 
-The previous stable release is 0.8.4 ([source](https://github.com/functional-streams-for-scala/fs2/tree/release/0.8.4)).
-
 ### Projects using FS2 ###
 
 If you have a project you'd like to include in this list, either open a PR or let us know in [the gitter channel](https://gitter.im/functional-streams-for-scala/fs2) and we'll add a link to it here.
 
 * [doobie](https://github.com/tpolecat/doobie): Pure functional JDBC built on fs2.
+* [fs2-crypto](https://github.com/Spinoco/fs2-crypto): TLS support for fs2.
 * [fs2-http](https://github.com/Spinoco/fs2-http): Http server and client library implemented in fs2.
 * [http4s](http://http4s.org/): Minimal, idiomatic Scala interface for HTTP services using fs2.
 * [fs2-kafka](https://github.com/Spinoco/fs2-kafka): Simple client for Apache Kafka.
@@ -111,6 +118,9 @@ If you have a project you'd like to include in this list, either open a PR or le
 * [fs2-zk](https://github.com/Spinoco/fs2-zk): Simple Apache Zookeeper bindings for fs2.
 * [fs2-reactive-streams](https://github.com/zainab-ali/fs2-reactive-streams): A reactive streams implementation for fs2.
 * [circe-fs2](https://github.com/circe/circe-fs2): Streaming JSON manipulation with [circe](https://github.com/circe/circe).
+* [fs2-elastic](https://github.com/amarrella/fs2-elastic): Simple client for Elasticsearch
+* [fs2-grpc](https://github.com/fiadliel/fs2-grpc): gRPC implementation for FS2/cats-effect
+* [fs2-blobstore](https://github.com/lendup/fs2-blobstore): Minimal, idiomatic, stream-based Scala interface for key/value store implementations.
 
 ### Related projects ###
 

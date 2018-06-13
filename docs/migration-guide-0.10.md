@@ -22,7 +22,7 @@ As a result of this migration, the `fs2.util` package has been removed. The type
 |`fs2.util.Effect`|`cats.effect.Effect`|
 |`fs2.util.UF1`|`cats.~>`|
 
-Note that cats-effect divides effect functionality up in to type classes a little differently than FS2 0.9. The `cats.effect.Async` type class describes a type constructor that supports the `async` constructor whereas `fs2.util.Async` included concurrency behavior. The type classes in cats-effect purposefully do not provide any means for concurrency. FS2 layers concurrency on top of `cats.effect.Effect` using the same `Ref` based scheme used in 0.9, but defined polymorphically for any `Effect`. This functionality is provided by `fs2.async.ref` and other methods in the `async` package. As a result, most implicit usages of `fs2.util.Async` should be replaced with `cats.effect.Effect` and `scala.concurrent.ExecutionContext`.
+Note that cats-effect divides effect functionality up in to type classes a little differently than FS2 0.9. The `cats.effect.Async` type class describes a type constructor that supports the `async` constructor whereas `fs2.util.Async` included concurrency behavior. The type classes in cats-effect purposefully do not provide any means for concurrency. FS2 layers concurrency on top of `cats.effect.Effect` using a `Ref` + `Promise` scheme similar to the one used in 0.9, but defined polymorphically for any `Effect`. This functionality is provided by `fs2.async.refOf`, `fs2.async.promise` and other methods in the `async` package. As a result, most implicit usages of `fs2.util.Async` should be replaced with `cats.effect.Effect` and `scala.concurrent.ExecutionContext`.
 
 #### Task/IO
 
@@ -43,7 +43,7 @@ As a result `fs2.Task` has been removed. Porting from `Task` to `IO` is relative
 |`t.unsafeRunAsync(cb)`|`io.unsafeRunAsync(cb)`| |
 |`t.unsafeRunFor(limit)`|`io.unsafeRunTimed(limit)`| |
 |`t.unsafeRunAsyncFuture`|`io.unsafeToFuture`| |
-|`Task.fromFuture(Future { ... })`|`IO.fromFuture(Eval.always(Future { ... }))`| Laziness is explicit via use of `cats.Eval` |
+|`Task.fromFuture(Future { ... })`|`IO.fromFuture(IO(Future { ... }))`| Effect capture is explicit via use of the inner `cats.effect.IO` |
 |`Task.async(reg => ...)`|`IO.async(reg => ...)`|Note that `IO.async` does *NOT* thread-shift, unlike `Task.async`. Use `IO.shift` as appropriate (`IO.async` is semantically equivalent to `Task.unforkedAsync`)|
 
 ### Performance
@@ -84,8 +84,8 @@ In 0.10, the `Handle` type has been removed. Instead, custom pulls are written d
 ```scala
 // Equivalent to s.take(1)
 s.pull.uncons1.flatMap {
-  case None => Pull.pure(())
-  case Some((hd, tl)) => Pull.output(hd)
+  case None => Pull.done
+  case Some((hd, tl)) => Pull.output1(hd)
 }.stream
 ```
 
@@ -133,6 +133,7 @@ The `debounce` pipe has moved to the `Scheduler` class also. As a result, FS2 no
 The `fs2.time.{ duration, every }` methods have been moved to `Stream` as they have no dependency on scheduling.
 
 #### Merging
+TODO: obsolete now (fixed)? We could just say that `concurrently` covers this use case conveniently
 
 The semantics of merging a drained stream with another stream have changed. In 0.9, it was generally safe to do things like:
 
@@ -154,12 +155,23 @@ Given that most usage of merging a drained stream with another stream should be 
 - `Stream.append` has been removed in favor of `s.append(s2)` or `s ++ s2`.
 - `fs2.Strategy` has been removed in favor of `scala.concurrent.ExecutionContext`.
 - `Sink` now has a companion object with various common patterns for constructing sinks (e.g., `Sink(s => IO(println(s)))`).
-- `ScopedFuture` has been renamed to `AsyncPull`.
+- `ScopedFuture` and `unconsAsync` have been removed in favor of using higher level concurrent data types like `Queue`, `Ref`, etc..
 - There is no `uncons1Async` (or any other equivalent to the old `await1Async`).
 - The `pull2` method on `Stream` no longer exists (unncessary due to lack of `Handle`). Replace by calling `.pull` on either `Stream`.
 - `NonEmptyChunk` no longer exists (and empty `Chunks` *can* be emitted).
 - The `Attempt` alias no longer exists - replace with `Either[Throwable,A]`.
 
-#### Cats Type Class Instances
+#### Compiling / Interpreting Streams
 
-Note that both `Stream` and `Pull` have type class instances for `cats.effect.Sync`, and hence all super type classes (e.g., `Monad`). These instances are defined in the `Stream` and `Pull` companion objects but they are *NOT* marked implicit. To use them implicitly, they must be manually assigned to an implicit val. This is because the Cats supplied syntax conflicts with `Stream` and `Pull` syntax, resulting in methods which ignore the covariance of `Stream` and `Pull`. Considering this is almost never the right option, these instances are non-implicit.
+In 0.9, a stream was compiled in to an effectful value via one of the `run` methods -- e.g., `run`, `runLog`, `runLast`. In 0.10, all methods which compile a stream in to an effectful value are under the `compile` prefix:
+
+
+|0.9|0.10|
+|---|---|
+|s.run|s.compile.drain|
+|s.runLog|s.compile.toVector|
+| |s.compile.toList|
+|s.runLast|s.compile.last|
+|s.runFold|s.compile.fold|
+| |s.compile.foldSemigroup|
+| |s.compile.foldMonoid|

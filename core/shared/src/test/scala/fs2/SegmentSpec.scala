@@ -94,7 +94,7 @@ class SegmentSpec extends Fs2Spec {
 
     "fold" in {
       forAll { (s: Segment[Int,Unit], init: Int, f: (Int, Int) => Int) =>
-        s.fold(init)(f).force.run shouldBe s.force.toVector.foldLeft(init)(f)
+        s.fold(init)(f).mapResult(_._2).force.run shouldBe s.force.toVector.foldLeft(init)(f)
       }
     }
 
@@ -124,7 +124,16 @@ class SegmentSpec extends Fs2Spec {
       forAll { (s: Segment[Int,Unit], n: Int) =>
         val result = s.force.splitAt(n)
         val v = s.force.toVector
-        if (n == 0 || n < v.size) {
+        if (n == v.size) {
+          result match {
+            case Left((_, chunks, rem)) =>
+              chunks.toVector.flatMap(_.toVector) shouldBe v
+              rem shouldBe 0
+            case Right((chunks, rest)) =>
+              chunks.toVector.flatMap(_.toVector) shouldBe v
+              rest.force.toVector shouldBe Vector.empty
+          }
+        } else if (n == 0 || n < v.size) {
           val Right((chunks, rest)) = result
           chunks.toVector.flatMap(_.toVector) shouldBe v.take(n)
           rest.force.toVector shouldBe v.drop(n)
@@ -134,6 +143,11 @@ class SegmentSpec extends Fs2Spec {
           rem shouldBe (n - v.size)
         }
       }
+    }
+
+    "splitAt eagerly exits" in {
+      val Right((chunks, rest)) = Segment.from(0L).filter(_ < 2L).force.splitAt(2)
+      chunks.toVector.flatMap(_.toVector) shouldBe Vector(0L, 1L)
     }
 
     "splitWhile" in {
@@ -181,12 +195,16 @@ class SegmentSpec extends Fs2Spec {
       forAll { (s: Segment[Int,Unit], n: Int) =>
         val v = s.force.toVector
         s.take(n).force.toVector shouldBe v.take(n)
-        if (n > 0 && n >= v.size) {
+        if (n > 0 && n > v.size) {
           s.take(n).drain.force.run shouldBe Left(((), n - v.size))
         } else {
           s.take(n).drain.force.run.map(_.force.toVector) shouldBe Right(Segment.vector(v.drop(n)).force.toVector)
         }
       }
+    }
+
+    "take eagerly exits" in {
+      Segment.from(0L).filter(_ < 2L).take(2).force.toVector shouldBe Vector(0L, 1L)
     }
 
     "takeWhile" in {
@@ -199,6 +217,10 @@ class SegmentSpec extends Fs2Spec {
       forAll { (s: Segment[Int,Unit], f: Int => Boolean) =>
         s.takeWhile(f, true).force.toVector shouldBe (s.force.toVector.takeWhile(f) ++ s.force.toVector.dropWhile(f).headOption)
       }
+    }
+
+    "takeWhile (3)" in {
+      Segment.catenated(Segment.unfold(0)(i => if (i < 1000) Some((i, i + 1)) else None).takeWhile(_ != 5, true).force.unconsAll._1.map(Segment.chunk)).force.toList shouldBe List(0, 1, 2, 3, 4, 5)
     }
 
     "unconsChunk" in {

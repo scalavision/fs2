@@ -7,6 +7,8 @@ import cats.implicits._
 import scala.concurrent.duration._
 import org.scalatest.EitherValues
 
+import TestUtil._
+
 class PromiseSpec extends AsyncFs2Spec with EitherValues {
 
   "Promise" - {
@@ -51,7 +53,7 @@ class PromiseSpec extends AsyncFs2Spec with EitherValues {
             _ <- p.complete(42)
             second <- p.timedGet(100.millis, scheduler)
           } yield List(first, second)
-      }.runLog.unsafeToFuture.map(_.flatten shouldBe Vector(None, Some(42)))
+      }.compile.toVector.unsafeToFuture.map(_.flatten shouldBe Vector(None, Some(42)))
     }
 
     "cancellableGet - cancel before force" in {
@@ -68,7 +70,63 @@ class PromiseSpec extends AsyncFs2Spec with EitherValues {
           _ <- scheduler.effect.sleep[IO](100.millis)
           result <- r.get
         } yield result
-      }.runLast.unsafeToFuture.map(_ shouldBe Some(None))
+      }.compile.last.unsafeToFuture.map(_ shouldBe Some(None))
+    }
+  }
+
+  "async.once" - {
+
+    "effect is not evaluated if the inner `F[A]` isn't bound" in {
+      mkScheduler.evalMap { scheduler =>
+        for {
+          ref <- async.refOf[IO, Int](42)
+          act = ref.modify(_ + 1)
+          _ <- async.once(act)
+          _ <- scheduler.effect.sleep[IO](100.millis)
+          v <- ref.get
+        } yield v
+      }.compile.last.unsafeToFuture.map(_ shouldBe Some(42))
+    }
+
+    "effect is evaluated once if the inner `F[A]` is bound twice" in {
+      val tsk = for {
+        ref <- async.refOf[IO, Int](42)
+        act = ref.modify(_ + 1).map(_.now)
+        memoized <- async.once(act)
+        x <- memoized
+        y <- memoized
+        v <- ref.get
+      } yield (x, y, v)
+      tsk.unsafeToFuture.map(_ shouldBe ((43, 43, 43)))
+    }
+
+    "effect is evaluated once if the inner `F[A]` is bound twice (race)" in {
+      mkScheduler.evalMap { scheduler =>
+        for {
+          ref <- async.refOf[IO, Int](42)
+          act = ref.modify(_ + 1).map(_.now)
+          memoized <- async.once(act)
+          _ <- async.fork(memoized)
+          x <- memoized
+          _ <- scheduler.effect.sleep[IO](100.millis)
+          v <- ref.get
+        } yield (x, v)
+      }.compile.last.unsafeToFuture.map(_ shouldBe Some((43, 43)))
+    }
+
+    "once andThen flatten is identity" in {
+      val n = 10
+      mkScheduler.evalMap { scheduler =>
+        for {
+          ref <- async.refOf[IO, Int](42)
+          act1 = ref.modify(_ + 1).map(_.now)
+          act2 = async.once(act1).flatten
+          _ <- async.fork(Stream.repeatEval(act1).take(n).compile.drain)
+          _ <- async.fork(Stream.repeatEval(act2).take(n).compile.drain)
+          _ <- scheduler.effect.sleep[IO](200.millis)
+          v <- ref.get
+        } yield v
+      }.compile.last.unsafeToFuture.map(_ shouldBe Some(42 + 2 * n))
     }
   }
 }

@@ -7,6 +7,8 @@ import cats.implicits._
 
 import fs2.StreamApp.ExitCode
 
+import TestUtil._
+
 class StreamAppSpec extends Fs2Spec {
 
   "StreamApp" - {
@@ -16,7 +18,7 @@ class StreamAppSpec extends Fs2Spec {
      * and observably cleans up when the process is stopped.
      */
     class TestStreamApp(stream: IO[Unit] => Stream[IO, ExitCode]) extends StreamApp[IO] {
-      val cleanedUp = async.signalOf[IO,Boolean](false).unsafeRunSync
+      val cleanedUp = async.signalOf[IO, Boolean](false).unsafeRunSync
 
       override def stream(args: List[String], requestShutdown: IO[Unit]): Stream[IO, ExitCode] =
         stream(requestShutdown).onFinalize(cleanedUp.set(true))
@@ -47,19 +49,19 @@ class StreamAppSpec extends Fs2Spec {
     }
 
     "Shut down a server from a separate thread" in {
-      val requestShutdown = async.signalOf[IO,IO[Unit]](IO.unit).unsafeRunSync
+      val requestShutdown = async.signalOf[IO, IO[Unit]](IO.unit).unsafeRunSync
 
       val testApp = new TestStreamApp(
         shutdown =>
           Stream.eval(requestShutdown.set(shutdown)) *>
             // run forever, emit nothing
             Stream.eval_(IO.async[Nothing] { _ =>
-            }))
+              }))
 
       (for {
         runApp <- async.start(testApp.doMain(List.empty))
         // Wait for app to start
-        _ <- requestShutdown.discrete.takeWhile(_ == IO.unit).run
+        _ <- requestShutdown.discrete.takeWhile(_ == IO.unit).compile.drain
         // Run shutdown task
         _ <- requestShutdown.get.flatten
         result <- runApp
