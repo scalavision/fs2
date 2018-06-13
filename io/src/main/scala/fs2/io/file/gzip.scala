@@ -19,11 +19,17 @@ object gzip {
     s"GZIP Magic $order byte not $flag, but $value, this may not be a GZIP filetype"
 
   def extractHeaderInformation[F[_]](chunkSize: Int, offset: Long = 0L)(
-      h: FileHandle[F]): Pull[F, Byte, Unit] = {
+      h: FileHandle[F]
+  ): Pull[F, Byte, Unit] = {
 
     // skip through bytes that we don't need
     // return the new offset
-    def skipBytes(size: Int, offset: Long): Long = ???
+    def skipBytes(size: Int, offset: Long, nrOfZeroTerminators: Int): Pull[F, Byte, Unit] =
+      Pull.eval(h.read(size, offset)).flatMap {
+        case Some(data) =>
+          Pull.outputChunk(data)
+        case None => Pull.done
+      }
 
     // skip zero terminated strings in header
     // return new offset
@@ -42,8 +48,10 @@ object gzip {
         } else {
           val flags = initialHeader(3)
           val extraBytesFlag = initialHeader(8)
-
+          // we count the number of flags with nullterminators
+          // we extract the number of bytes we need to pull out
           if (extraBytesFlag > 0) {
+            skipBytes(0, 0, 0)
             ???
           } else {
             Pull.outputChunk(initialHeader)
