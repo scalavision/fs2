@@ -3,48 +3,12 @@ package io
 package file
 
 import java.nio.file.{Path, StandardOpenOption}
+import java.time.{LocalDateTime, ZoneOffset}
 
 import cats.effect.Sync
 import fs2.Stream
 
 object gzip {
-
-  // gzip magic
-  private final val ID1 = 0x1F.toByte
-  private final val ID2 = 0x8b.toByte
-  // gzip compression method, 8 is the only supported method
-  private final val CM = 0x08.toByte
-
-  // we take the number of bytes that gives the initial info about the header
-  private final val initialHeaderLength = 11
-
-  // Bit offsets for the flag
-  private final val FEXTRA = 4
-  private final val FNAME = 8
-  private final val FCOMMENT = 16
-  private final val FHCRC = 2
-
-  val errorMessage: (Int, Int, String) => String = (flag, value, order) =>
-    s"GZIP Magic $order byte not $flag, but $value, this may not be a GZIP filetype"
-
-  sealed trait GZipHeaderData
-  case class ModificationTime(epoch: Long) extends GZipHeaderData
-  case class ExtraField(value: Array[Byte]) extends GZipHeaderData
-  case class FileName(value: String) extends GZipHeaderData
-  case class Comment(value: String) extends GZipHeaderData
-  case class CRC16(value: Option[(Byte, Byte)]) extends GZipHeaderData
-  case class CRC32(value: (Byte, Byte, Byte, Byte)) extends GZipHeaderData
-  case class ISIZE(value: (Byte, Byte, Byte, Byte)) extends GZipHeaderData
-
-  case class GZipHeader(
-      modificationTime: ModificationTime,
-      extraField: ExtraField,
-      fileName: FileName,
-      comment: Comment,
-      CRC16: CRC16,
-      CRC32: CRC32,
-      ISIZE: ISIZE
-  )
 
   //TODO: Skip the concept of returning a Pull[F, Byte, Unit]
   // instead return an Either of Header or something ???
@@ -143,6 +107,156 @@ object gzip {
       .flatMap { c =>
         headerValidator(chunkSize)(c.resource) //>>
       //pulls.readAllFromFileHandle(chunkSize)(c.resource)
+      }
+      .stream
+
+  // gzip magic
+  private final val ID1 = 0x1F.toByte
+  private final val ID2 = 0x8b.toByte
+  // gzip compression method, 8 is the only supported method
+  private final val CM = 0x08.toByte
+
+  // we take the number of bytes that gives the initial info about the header
+  private final val initialHeaderLength = 11
+
+  // Bit offsets for the flag
+  private final val FEXTRA = 4
+  private final val FNAME = 8
+  private final val FCOMMENT = 16
+  private final val FHCRC = 2
+
+  val errorMessage: (Int, Int, String) => String = (flag, value, order) =>
+    s"GZIP Magic $order byte not $flag, but $value, this may not be a GZIP filetype"
+
+  sealed trait Steps
+  case object ValidateHeaderFields extends Steps
+  case object ExamineFlags extends Steps
+  case class ExtractHeaderData(fExtra: Boolean, fName: Boolean, fComment: Boolean, fHRCR: Boolean)
+      extends Steps
+
+  case class HeaderMetaData(
+      id1: Byte,
+      id2: Byte,
+      cm: Byte,
+      flags: Byte,
+      mTime: (Byte, Byte, Byte, Byte),
+      xfl: Byte,
+      os: Byte,
+      FExtraFlag: (Byte, Byte)
+  ) {
+
+    def osTable = Map(
+      0 -> "FAT filesystem (MS-DOS, OS/2, NT/Win32)",
+      1 -> "Amiga",
+      2 -> "VMS (or OpenVMS)",
+      3 -> "Unix",
+      4 -> "VM/CMS",
+      5 -> "Atari TOS",
+      6 -> "HPFS filesystem (OS/2, NT)",
+      7 -> "Macintosh",
+      8 -> "Z-System",
+      9 -> "CP/M",
+      10 -> "TOPS-20",
+      11 -> "NTFS filesystem (NT)",
+      12 -> "QDOS",
+      13 -> "Acorn RISCOS",
+      255 -> "unknown"
+    )
+
+    def asHex: Byte => String = byte => String.format("%02X", new java.lang.Integer(byte & 0xff))
+
+    def time: LocalDateTime = {
+      val epoch = BigInt(Array[Byte](mTime._1, mTime._2, mTime._3, mTime._4)).longValue()
+      LocalDateTime.ofEpochSecond(epoch, 0, ZoneOffset.UTC)
+    }
+
+    override def toString: String =
+      s"""
+         |id1:   ${asHex(id1)}
+         |id2:   ${asHex(id2)}
+         |cm:    ${asHex(cm)}
+         |flags: ${flags.toBinaryString} (${asHex(flags)})
+         |mTime: $time
+         |xfl:   ${asHex(xfl)}
+         |os:    ${asHex(os)} (${osTable.getOrElse(os, "Operating System id has wrong value: " + os)})
+         |fExtraFlag: ${asHex(FExtraFlag._1) + asHex(FExtraFlag._2)}
+       """.stripMargin
+  }
+
+  sealed trait GZipHeaderData
+  case class ModificationTime(epoch: Long) extends GZipHeaderData
+  case class ExtraField(value: Array[Byte]) extends GZipHeaderData
+  case class FileName(value: String) extends GZipHeaderData
+  case class Comment(value: String) extends GZipHeaderData
+  case class CRC16(value: Option[(Byte, Byte)]) extends GZipHeaderData
+  case class CRC32(value: (Byte, Byte, Byte, Byte)) extends GZipHeaderData
+  case class ISIZE(value: (Byte, Byte, Byte, Byte)) extends GZipHeaderData
+
+  case class GZipHeader(
+      modificationTime: ModificationTime,
+      extraField: Option[ExtraField],
+      fileName: Option[FileName],
+      comment: Option[Comment],
+      CRC16: Option[CRC16],
+      CRC32: CRC32,
+      ISIZE: ISIZE,
+      nrOfBytes: Long
+  )
+
+  final case class HeaderTooSmall(data: Chunk[Byte]) extends Exception
+  final case class InvalidGzipFile(data: Chunk[Byte]) extends Exception
+
+  def extractHeaderMetaData[F[_]](
+      h: FileHandle[F]): Pull[F, (FileHandle[F], HeaderMetaData), Unit] =
+    Pull.eval(h.read(12, 0)).flatMap {
+      case Some(data) =>
+        if (data.size < 12)
+          Pull.raiseError(HeaderTooSmall(data))
+        else {
+          Pull.output1[F, (FileHandle[F], HeaderMetaData)](
+            (h,
+             HeaderMetaData(
+               id1 = data(0),
+               id2 = data(1),
+               cm = data(2),
+               flags = data(3),
+               mTime = (data(4), data(5), data(6), data(7)),
+               xfl = data(8),
+               os = data(9),
+               FExtraFlag = (data(10), data(11))
+             )))
+        }
+
+      case None =>
+        Pull.done
+    }
+
+  def parseHeader[F[_]]: Pipe[F, (FileHandle[F], HeaderMetaData), Vector[GZipHeaderData]] = {
+
+    //TODO: iterate through the header data and return it with the offset
+    def iterateHeaderBytes(headerMetaData: HeaderMetaData, steps: Steps)(
+        h: FileHandle[F]): Pull[F, Vector[GZipHeaderData], Unit] = ???
+
+    def go(s: Stream[F, (FileHandle[F], HeaderMetaData)]): Pull[F, Vector[GZipHeaderData], Unit] =
+      s.pull.unconsChunk.flatMap {
+        case Some((dataChunk, tail)) =>
+          val data = dataChunk.toList.headOption
+          if (data.isDefined) {
+            Pull.output1(Vector.empty[GZipHeaderData])
+          } else Pull.raiseError(new Throwable("No header data available"))
+        case None =>
+          Pull.done
+      }
+
+    in =>
+      go(in).stream
+  }
+
+  def gzipHeader[F[_]: Sync](path: Path): Stream[F, (FileHandle[F], HeaderMetaData)] =
+    pulls
+      .fromPath(path, List(StandardOpenOption.READ))
+      .flatMap { c =>
+        extractHeaderMetaData(c.resource)
       }
       .stream
 

@@ -32,10 +32,13 @@ class gzipSpec extends Fs2Spec {
 //        .map(_.toByte)
 
       runLog {
-        gzip.unzip[IO](
+        val result = gzip.gzipHeader[IO](
           Paths.get(
-            "/home/obiwan/stash/sources/scala/tools/cmdbuilder/OldProject/PipeGen/src/main/resources/zipTest.fai.gz"),
-          100)
+            "/home/obiwan/stash/sources/scala/tools/cmdbuilder/OldProject/PipeGen/src/main/resources/zipTest.fai.gz")
+        )
+
+        println(result.compile.toVector.unsafeRunSync())
+        result
       }
 
       1 shouldBe (1)
