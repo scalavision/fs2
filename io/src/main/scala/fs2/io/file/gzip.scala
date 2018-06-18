@@ -6,7 +6,6 @@ import java.nio.file.{Path, StandardOpenOption}
 import java.time.{LocalDateTime, ZoneOffset}
 
 import cats.effect.Sync
-import fs2.Stream
 
 object gzip {
 
@@ -116,8 +115,8 @@ object gzip {
   // gzip compression method, 8 is the only supported method
   private final val CM = 0x08.toByte
 
-  // we take the number of bytes that gives the initial info about the header
-  private final val initialHeaderLength = 11
+  // we take the number of bytes that gives the initial metainfo about the header
+  private final val initialHeaderLength = 12
 
   // Bit offsets for the flag
   private final val FEXTRA = 4
@@ -127,12 +126,6 @@ object gzip {
 
   val errorMessage: (Int, Int, String) => String = (flag, value, order) =>
     s"GZIP Magic $order byte not $flag, but $value, this may not be a GZIP filetype"
-
-  sealed trait Steps
-  case object ValidateHeaderFields extends Steps
-  case object ExamineFlags extends Steps
-  case class ExtractHeaderData(fExtra: Boolean, fName: Boolean, fComment: Boolean, fHRCR: Boolean)
-      extends Steps
 
   case class HeaderMetaData(
       id1: Byte,
@@ -203,15 +196,15 @@ object gzip {
       nrOfBytes: Long
   )
 
-  final case class HeaderTooSmall(data: Chunk[Byte]) extends Exception
+  final case class FileIsEmpty(data: Chunk[Byte]) extends Exception
   final case class InvalidGzipFile(data: Chunk[Byte]) extends Exception
 
   def extractHeaderMetaData[F[_]](
       h: FileHandle[F]): Pull[F, (FileHandle[F], HeaderMetaData), Unit] =
-    Pull.eval(h.read(12, 0)).flatMap {
+    Pull.eval(h.read(initialHeaderLength, 0)).flatMap {
       case Some(data) =>
-        if (data.size < 12)
-          Pull.raiseError(HeaderTooSmall(data))
+        if (data.size < initialHeaderLength)
+          Pull.raiseError(FileIsEmpty(data))
         else {
           Pull.output1[F, (FileHandle[F], HeaderMetaData)](
             (h,
@@ -231,11 +224,42 @@ object gzip {
         Pull.done
     }
 
+  sealed trait Steps
+  case object ValidateHeaderFields extends Steps
+  case object ExamineFlags extends Steps
+  case class ExtractHeaderData(fExtra: Boolean, fName: Boolean, fComment: Boolean, fHRCR: Boolean)
+      extends Steps
+
   def parseHeader[F[_]]: Pipe[F, (FileHandle[F], HeaderMetaData), Vector[GZipHeaderData]] = {
+
+    def validateHeaderFields(
+        headerMetaData: HeaderMetaData): Pull[F, Vector[GZipHeaderData], Unit] = {
+      //TODO: output something sensible
+      Pull.output1(???)
+      ???
+    }
+
+    def examineFlags(headerMetaData: HeaderMetaData): Pull[F, Vector[GZipHeaderData], Unit] = {
+      //TODO: output something sensible
+      Pull.output1(???)
+      ???
+    }
 
     //TODO: iterate through the header data and return it with the offset
     def iterateHeaderBytes(headerMetaData: HeaderMetaData, steps: Steps)(
-        h: FileHandle[F]): Pull[F, Vector[GZipHeaderData], Unit] = ???
+        h: FileHandle[F]): Pull[F, Vector[GZipHeaderData], Unit] = steps match {
+
+      case ValidateHeaderFields =>
+        validateHeaderFields(headerMetaData) >>
+          iterateHeaderBytes(headerMetaData, ExamineFlags)(h)
+
+      case ExamineFlags =>
+        examineFlags(headerMetaData)
+
+      case ExtractHeaderData(fExtra, fName, fComment, fHRCR) =>
+        ???
+
+    }
 
     def go(s: Stream[F, (FileHandle[F], HeaderMetaData)]): Pull[F, Vector[GZipHeaderData], Unit] =
       s.pull.unconsChunk.flatMap {
